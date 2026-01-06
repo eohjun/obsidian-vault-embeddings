@@ -1,0 +1,28 @@
+{
+  "name": "obsidian-vault-embeddings",
+  "version": "0.1.0",
+  "description": "Centralized embedding storage for Obsidian vault - embed once, use everywhere",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "typecheck": "tsc -noEmit -skipLibCheck"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "embeddings",
+    "ai",
+    "semantic-search",
+    "pkm"
+  ],
+  "author": "eohjun",
+  "license": "MIT",
+  "devDependencies": {
+    "builtin-modules": "^5.0.0",
+    "esbuild": "^0.27.2",
+    "obsidian": "^1.11.0",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3"
+  }
+}

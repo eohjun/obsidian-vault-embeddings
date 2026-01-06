@@ -1,0 +1,14 @@
+/* Vault Embeddings Styles */
+
+.vault-embeddings-stats {
+  padding: 10px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.vault-embeddings-stats p {
+  margin: 5px 0;
+  font-size: 0.9em;
+  color: var(--text-muted);
+}

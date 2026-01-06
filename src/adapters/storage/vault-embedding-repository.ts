@@ -1,0 +1,328 @@
+/**
+ * VaultEmbeddingRepository
+ * 볼트 폴더에 임베딩 데이터 저장
+ */
+
+import { App, TFile, TFolder } from 'obsidian';
+import type {
+  NoteEmbedding,
+  IEmbeddingRepository,
+  EmbeddingIndex,
+} from '../../core/domain';
+import {
+  serializeNoteEmbedding,
+  deserializeNoteEmbedding,
+} from '../../core/domain';
+
+const INDEX_VERSION = '1.0.0';
+
+export interface VaultEmbeddingRepositoryConfig {
+  /** 임베딩 저장 폴더 (기본: 09_Embedded) */
+  storagePath: string;
+  /** 임베딩 파일 폴더 (기본: embeddings) */
+  embeddingsFolder: string;
+}
+
+const DEFAULT_CONFIG: VaultEmbeddingRepositoryConfig = {
+  storagePath: '09_Embedded',
+  embeddingsFolder: 'embeddings',
+};
+
+export class VaultEmbeddingRepository implements IEmbeddingRepository {
+  private config: VaultEmbeddingRepositoryConfig;
+  private indexCache: EmbeddingIndex | null = null;
+
+  constructor(
+    private app: App,
+    config?: Partial<VaultEmbeddingRepositoryConfig>
+  ) {
+    this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /**
+   * 저장소 초기화 (폴더 생성)
+   */
+  async initialize(): Promise<void> {
+    const basePath = this.config.storagePath;
+    const embeddingsPath = `${basePath}/${this.config.embeddingsFolder}`;
+
+    // 기본 폴더 생성
+    await this.ensureFolder(basePath);
+    await this.ensureFolder(embeddingsPath);
+
+    // 인덱스 파일 초기화
+    const indexPath = this.getIndexPath();
+    if (!await this.fileExists(indexPath)) {
+      await this.saveIndex(this.createEmptyIndex());
+    }
+  }
+
+  /**
+   * 임베딩 저장
+   */
+  async save(embedding: NoteEmbedding): Promise<void> {
+    const filePath = this.getEmbeddingPath(embedding.noteId);
+    const serialized = serializeNoteEmbedding(embedding);
+    const content = JSON.stringify(serialized, null, 2);
+
+    await this.writeFile(filePath, content);
+    this.invalidateIndexCache();
+  }
+
+  /**
+   * 여러 임베딩 일괄 저장
+   */
+  async saveBatch(embeddings: NoteEmbedding[]): Promise<void> {
+    for (const embedding of embeddings) {
+      await this.save(embedding);
+    }
+  }
+
+  /**
+   * ID로 임베딩 조회
+   */
+  async findById(noteId: string): Promise<NoteEmbedding | null> {
+    const filePath = this.getEmbeddingPath(noteId);
+
+    if (!await this.fileExists(filePath)) {
+      return null;
+    }
+
+    try {
+      const content = await this.readFile(filePath);
+      const data = JSON.parse(content);
+      return deserializeNoteEmbedding(data);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 파일 경로로 임베딩 조회
+   */
+  async findByPath(notePath: string): Promise<NoteEmbedding | null> {
+    const index = await this.getIndex();
+
+    for (const [noteId, info] of Object.entries(index.notes)) {
+      if (info.path === notePath) {
+        return this.findById(noteId);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * 모든 임베딩 조회
+   */
+  async findAll(): Promise<NoteEmbedding[]> {
+    const index = await this.getIndex();
+    const embeddings: NoteEmbedding[] = [];
+
+    for (const noteId of Object.keys(index.notes)) {
+      const embedding = await this.findById(noteId);
+      if (embedding) {
+        embeddings.push(embedding);
+      }
+    }
+
+    return embeddings;
+  }
+
+  /**
+   * 임베딩 삭제
+   */
+  async delete(noteId: string): Promise<void> {
+    const filePath = this.getEmbeddingPath(noteId);
+    await this.deleteFile(filePath);
+    this.invalidateIndexCache();
+  }
+
+  /**
+   * 임베딩 존재 여부 확인
+   */
+  async exists(noteId: string): Promise<boolean> {
+    const filePath = this.getEmbeddingPath(noteId);
+    return this.fileExists(filePath);
+  }
+
+  /**
+   * contentHash 조회
+   */
+  async getContentHash(noteId: string): Promise<string | null> {
+    const index = await this.getIndex();
+    return index.notes[noteId]?.contentHash || null;
+  }
+
+  /**
+   * 인덱스 업데이트
+   */
+  async updateIndex(): Promise<void> {
+    const embeddingsPath = `${this.config.storagePath}/${this.config.embeddingsFolder}`;
+    const folder = this.app.vault.getAbstractFileByPath(embeddingsPath);
+
+    if (!(folder instanceof TFolder)) {
+      await this.saveIndex(this.createEmptyIndex());
+      return;
+    }
+
+    const notes: EmbeddingIndex['notes'] = {};
+    let model = '';
+    let dimensions = 0;
+
+    for (const file of folder.children) {
+      if (file instanceof TFile && file.extension === 'json') {
+        try {
+          const content = await this.app.vault.read(file);
+          const embedding = deserializeNoteEmbedding(JSON.parse(content));
+
+          notes[embedding.noteId] = {
+            path: embedding.notePath,
+            contentHash: embedding.contentHash,
+            updatedAt: embedding.updatedAt.toISOString(),
+          };
+
+          if (!model) model = embedding.model;
+          if (!dimensions) dimensions = embedding.dimensions;
+        } catch {
+          // 파싱 실패한 파일 무시
+        }
+      }
+    }
+
+    const index: EmbeddingIndex = {
+      version: INDEX_VERSION,
+      totalNotes: Object.keys(notes).length,
+      lastUpdated: new Date().toISOString(),
+      model,
+      dimensions,
+      notes,
+    };
+
+    await this.saveIndex(index);
+  }
+
+  /**
+   * 인덱스 조회
+   */
+  async getIndex(): Promise<EmbeddingIndex> {
+    if (this.indexCache) {
+      return this.indexCache;
+    }
+
+    const indexPath = this.getIndexPath();
+
+    if (!await this.fileExists(indexPath)) {
+      const emptyIndex = this.createEmptyIndex();
+      this.indexCache = emptyIndex;
+      return emptyIndex;
+    }
+
+    try {
+      const content = await this.readFile(indexPath);
+      const index = JSON.parse(content) as EmbeddingIndex;
+      this.indexCache = index;
+      return index;
+    } catch {
+      const emptyIndex = this.createEmptyIndex();
+      this.indexCache = emptyIndex;
+      return emptyIndex;
+    }
+  }
+
+  /**
+   * 저장된 임베딩 수
+   */
+  async count(): Promise<number> {
+    const index = await this.getIndex();
+    return index.totalNotes;
+  }
+
+  /**
+   * 모든 임베딩 삭제
+   */
+  async clear(): Promise<void> {
+    const embeddingsPath = `${this.config.storagePath}/${this.config.embeddingsFolder}`;
+    const folder = this.app.vault.getAbstractFileByPath(embeddingsPath);
+
+    if (folder instanceof TFolder) {
+      for (const file of folder.children) {
+        if (file instanceof TFile) {
+          await this.app.vault.delete(file);
+        }
+      }
+    }
+
+    await this.saveIndex(this.createEmptyIndex());
+  }
+
+  // ==================== Private Methods ====================
+
+  private getIndexPath(): string {
+    return `${this.config.storagePath}/index.json`;
+  }
+
+  private getEmbeddingPath(noteId: string): string {
+    // noteId를 안전한 파일명으로 변환
+    const safeId = noteId.replace(/[^a-zA-Z0-9-_]/g, '_');
+    return `${this.config.storagePath}/${this.config.embeddingsFolder}/${safeId}.json`;
+  }
+
+  private createEmptyIndex(): EmbeddingIndex {
+    return {
+      version: INDEX_VERSION,
+      totalNotes: 0,
+      lastUpdated: new Date().toISOString(),
+      model: '',
+      dimensions: 0,
+      notes: {},
+    };
+  }
+
+  private async saveIndex(index: EmbeddingIndex): Promise<void> {
+    const indexPath = this.getIndexPath();
+    const content = JSON.stringify(index, null, 2);
+    await this.writeFile(indexPath, content);
+    this.indexCache = index;
+  }
+
+  private invalidateIndexCache(): void {
+    this.indexCache = null;
+  }
+
+  private async ensureFolder(path: string): Promise<void> {
+    const folder = this.app.vault.getAbstractFileByPath(path);
+    if (!folder) {
+      await this.app.vault.createFolder(path);
+    }
+  }
+
+  private async fileExists(path: string): Promise<boolean> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    return file instanceof TFile;
+  }
+
+  private async readFile(path: string): Promise<string> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      throw new Error(`File not found: ${path}`);
+    }
+    return this.app.vault.read(file);
+  }
+
+  private async writeFile(path: string, content: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile) {
+      await this.app.vault.modify(file, content);
+    } else {
+      await this.app.vault.create(path, content);
+    }
+  }
+
+  private async deleteFile(path: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile) {
+      await this.app.vault.delete(file);
+    }
+  }
+}

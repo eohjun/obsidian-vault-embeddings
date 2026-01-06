@@ -143,13 +143,15 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
 
             try {
               const result = await this.plugin.embedAllNotes((progress) => {
+                const attempted = progress.completed + progress.failed;
+                const success = progress.completed - progress.skipped;
                 const pct = progress.total > 0
-                  ? Math.round((progress.completed / progress.total) * 100)
+                  ? Math.round((attempted / progress.total) * 100)
                   : 0;
                 modal.updateProgress({
-                  current: progress.completed,
+                  current: attempted,
                   total: progress.total,
-                  message: `Processing: ${progress.completed} / ${progress.total} (${progress.skipped} skipped)`,
+                  message: `Processing: ${success} / ${attempted} (${progress.skipped} skipped, ${progress.failed} failed)`,
                   percentage: pct,
                 });
               });
@@ -179,13 +181,15 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
 
           try {
             const result = await this.plugin.embedStaleNotes((progress) => {
+              const attempted = progress.completed + progress.failed;
+              const updated = progress.completed - progress.skipped;
               const pct = progress.total > 0
-                ? Math.round((progress.completed / progress.total) * 100)
+                ? Math.round((attempted / progress.total) * 100)
                 : 0;
               modal.updateProgress({
-                current: progress.completed,
+                current: attempted,
                 total: progress.total,
-                message: `Checking: ${progress.completed} / ${progress.total}`,
+                message: `Checking: ${updated} updated / ${attempted} checked (${progress.skipped} unchanged)`,
                 percentage: pct,
               });
             });

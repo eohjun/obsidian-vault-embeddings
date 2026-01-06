@@ -4,6 +4,7 @@
 
 import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
 import type VaultEmbeddingsPlugin from '../main';
+import { ProgressModal } from '../ui/progress-modal';
 
 export class VaultEmbeddingsSettingTab extends PluginSettingTab {
   plugin: VaultEmbeddingsPlugin;
@@ -98,8 +99,8 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
     containerEl.createEl('h3', { text: 'Auto Embedding' });
 
     new Setting(containerEl)
-      .setName('Auto Embed on Modify')
-      .setDesc('Automatically update embeddings when notes are modified')
+      .setName('Auto Embed')
+      .setDesc('Automatically create/update embeddings when notes are created or modified')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.autoEmbed).onChange(async (value) => {
           this.plugin.settings.autoEmbed = value;
@@ -137,24 +138,28 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
               return;
             }
 
-            button.setDisabled(true);
-            button.setButtonText('Embedding...');
+            const modal = new ProgressModal(this.app, 'Embedding All Notes');
+            modal.open();
 
             try {
               const result = await this.plugin.embedAllNotes((progress) => {
-                button.setButtonText(
-                  `${progress.completed}/${progress.total} (${progress.skipped} skipped)`
-                );
+                const pct = progress.total > 0
+                  ? Math.round((progress.completed / progress.total) * 100)
+                  : 0;
+                modal.updateProgress({
+                  current: progress.completed,
+                  total: progress.total,
+                  message: `Processing: ${progress.completed} / ${progress.total} (${progress.skipped} skipped)`,
+                  percentage: pct,
+                });
               });
 
-              new Notice(
-                `Embedding complete! ${result.success} new, ${result.skipped} skipped, ${result.failed} failed`
+              modal.setComplete(
+                `✅ Complete! ${result.success} embedded, ${result.skipped} skipped, ${result.failed} failed`
               );
             } catch (error) {
-              new Notice('Embedding failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
-            } finally {
-              button.setDisabled(false);
-              button.setButtonText('Embed All');
+              const msg = error instanceof Error ? error.message : 'Unknown error';
+              modal.setError(`❌ Failed: ${msg}`);
             }
           });
       });
@@ -169,22 +174,28 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
             return;
           }
 
-          button.setDisabled(true);
-          button.setButtonText('Updating...');
+          const modal = new ProgressModal(this.app, 'Updating Stale Embeddings');
+          modal.open();
 
           try {
             const result = await this.plugin.embedStaleNotes((progress) => {
-              button.setButtonText(`${progress.completed}/${progress.total}`);
+              const pct = progress.total > 0
+                ? Math.round((progress.completed / progress.total) * 100)
+                : 0;
+              modal.updateProgress({
+                current: progress.completed,
+                total: progress.total,
+                message: `Checking: ${progress.completed} / ${progress.total}`,
+                percentage: pct,
+              });
             });
 
-            new Notice(
-              `Update complete! ${result.updated} updated, ${result.skipped} skipped, ${result.failed} failed`
+            modal.setComplete(
+              `✅ Complete! ${result.updated} updated, ${result.skipped} skipped, ${result.failed} failed`
             );
           } catch (error) {
-            new Notice('Update failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
-          } finally {
-            button.setDisabled(false);
-            button.setButtonText('Update Stale');
+            const msg = error instanceof Error ? error.message : 'Unknown error';
+            modal.setError(`❌ Failed: ${msg}`);
           }
         });
       });

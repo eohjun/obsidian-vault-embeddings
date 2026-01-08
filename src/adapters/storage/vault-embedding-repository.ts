@@ -290,11 +290,47 @@ export class VaultEmbeddingRepository implements IEmbeddingRepository {
     this.indexCache = null;
   }
 
+  /**
+   * 폴더 존재 확인 및 생성 (robust 버전)
+   * - 이미 폴더가 존재하면 아무것도 안 함
+   * - 폴더가 없으면 생성
+   * - 생성 중 에러 발생 시 (이미 존재 등) 재확인 후 진행
+   */
   private async ensureFolder(path: string): Promise<void> {
-    const folder = this.app.vault.getAbstractFileByPath(path);
-    if (!folder) {
-      await this.app.vault.createFolder(path);
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    
+    // 이미 폴더로 존재
+    if (existing instanceof TFolder) {
+      return;
     }
+    
+    // 파일로 존재하면 에러 (폴더여야 함)
+    if (existing instanceof TFile) {
+      throw new Error(`Path exists as file, expected folder: ${path}`);
+    }
+    
+    // 존재하지 않으면 생성 시도
+    try {
+      await this.app.vault.createFolder(path);
+    } catch (error) {
+      // 생성 실패 시 다시 확인 (동시성 또는 동기화 이슈)
+      // 약간 대기 후 재확인 (Obsidian 인덱스 갱신 대기)
+      await this.delay(100);
+      
+      const recheckExisting = this.app.vault.getAbstractFileByPath(path);
+      if (recheckExisting instanceof TFolder) {
+        // 다시 확인해보니 폴더가 있음 → 정상
+        console.log(`Vault Embeddings: Folder exists after retry: ${path}`);
+        return;
+      }
+      
+      // 여전히 없으면 에러
+      throw new Error(`Failed to create folder: ${path} - ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private async fileExists(path: string): Promise<boolean> {

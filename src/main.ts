@@ -97,33 +97,59 @@ export default class VaultEmbeddingsPlugin extends Plugin {
     await this.initializeServices();
   }
 
+  /** 초기화 에러 메시지 (디버깅용) */
+  private initError: string | null = null;
+
+  /**
+   * 초기화 에러 조회
+   */
+  getInitError(): string | null {
+    return this.initError;
+  }
+
   /**
    * 서비스 초기화
    */
   private async initializeServices(): Promise<void> {
+    this.initError = null;
+    
     // API 키가 없으면 서비스 초기화하지 않음
     if (!this.settings.openaiApiKey) {
       console.log('Vault Embeddings: API key not configured');
+      this.initError = 'API key not configured';
       return;
     }
 
     try {
-      // Embedding Provider
+      // Step 1: Embedding Provider
+      console.log('Vault Embeddings: Initializing provider...');
       this.embeddingProvider = new OpenAIEmbeddingProvider(
         this.settings.openaiApiKey,
         this.settings.model
       );
+      console.log('Vault Embeddings: Provider initialized');
 
-      // Embedding Repository
+      // Step 2: Embedding Repository
+      console.log('Vault Embeddings: Creating repository...');
       this.embeddingRepository = new VaultEmbeddingRepository(this.app, {
         storagePath: this.settings.storagePath,
       });
-      await this.embeddingRepository.initialize();
+      
+      console.log('Vault Embeddings: Initializing storage...');
+      try {
+        await this.embeddingRepository.initialize();
+        console.log('Vault Embeddings: Storage initialized');
+      } catch (storageError) {
+        const msg = storageError instanceof Error ? storageError.message : 'Unknown storage error';
+        console.error('Vault Embeddings: Storage initialization failed:', msg);
+        this.initError = `Storage initialization failed: ${msg}`;
+        return;
+      }
 
-      // Note Repository
+      // Step 3: Note Repository
       this.noteRepository = new ObsidianNoteRepository(this.app);
 
-      // Embedding Service
+      // Step 4: Embedding Service
       this.embeddingService = new EmbeddingService(
         this.embeddingProvider,
         this.embeddingRepository,
@@ -133,9 +159,11 @@ export default class VaultEmbeddingsPlugin extends Plugin {
       // Auto-embed debounce 설정
       this.setupAutoEmbed();
 
-      console.log('Vault Embeddings: Services initialized');
+      console.log('Vault Embeddings: All services initialized successfully');
     } catch (error) {
-      console.error('Failed to initialize services:', error);
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Vault Embeddings: Failed to initialize services:', msg);
+      this.initError = msg;
     }
   }
 
@@ -358,7 +386,12 @@ export default class VaultEmbeddingsPlugin extends Plugin {
 
   private async embedAllNotesCommand(): Promise<void> {
     if (!this.isConfigured()) {
-      new Notice('Please configure API key first');
+      const error = this.getInitError();
+      if (error) {
+        new Notice(`Configuration error: ${error}`);
+      } else {
+        new Notice('Please configure API key first');
+      }
       return;
     }
 

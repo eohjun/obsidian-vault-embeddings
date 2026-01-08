@@ -3,7 +3,7 @@
  * 볼트 폴더에 임베딩 데이터 저장
  */
 
-import { App, TFile, TFolder } from 'obsidian';
+import { App, TFile, TFolder, normalizePath } from 'obsidian';
 import type {
   NoteEmbedding,
   IEmbeddingRepository,
@@ -43,8 +43,8 @@ export class VaultEmbeddingRepository implements IEmbeddingRepository {
    * 저장소 초기화 (폴더 생성)
    */
   async initialize(): Promise<void> {
-    const basePath = this.config.storagePath;
-    const embeddingsPath = `${basePath}/${this.config.embeddingsFolder}`;
+    const basePath = normalizePath(this.config.storagePath);
+    const embeddingsPath = normalizePath(`${basePath}/${this.config.embeddingsFolder}`);
 
     // 기본 폴더 생성
     await this.ensureFolder(basePath);
@@ -158,7 +158,7 @@ export class VaultEmbeddingRepository implements IEmbeddingRepository {
    * 인덱스 업데이트
    */
   async updateIndex(): Promise<void> {
-    const embeddingsPath = `${this.config.storagePath}/${this.config.embeddingsFolder}`;
+    const embeddingsPath = normalizePath(`${this.config.storagePath}/${this.config.embeddingsFolder}`);
     const folder = this.app.vault.getAbstractFileByPath(embeddingsPath);
 
     if (!(folder instanceof TFolder)) {
@@ -242,7 +242,7 @@ export class VaultEmbeddingRepository implements IEmbeddingRepository {
    * 모든 임베딩 삭제
    */
   async clear(): Promise<void> {
-    const embeddingsPath = `${this.config.storagePath}/${this.config.embeddingsFolder}`;
+    const embeddingsPath = normalizePath(`${this.config.storagePath}/${this.config.embeddingsFolder}`);
     const folder = this.app.vault.getAbstractFileByPath(embeddingsPath);
 
     if (folder instanceof TFolder) {
@@ -259,13 +259,13 @@ export class VaultEmbeddingRepository implements IEmbeddingRepository {
   // ==================== Private Methods ====================
 
   private getIndexPath(): string {
-    return `${this.config.storagePath}/index.json`;
+    return normalizePath(`${this.config.storagePath}/index.json`);
   }
 
   private getEmbeddingPath(noteId: string): string {
     // noteId를 안전한 파일명으로 변환
     const safeId = noteId.replace(/[^a-zA-Z0-9-_]/g, '_');
-    return `${this.config.storagePath}/${this.config.embeddingsFolder}/${safeId}.json`;
+    return normalizePath(`${this.config.storagePath}/${this.config.embeddingsFolder}/${safeId}.json`);
   }
 
   private createEmptyIndex(): EmbeddingIndex {

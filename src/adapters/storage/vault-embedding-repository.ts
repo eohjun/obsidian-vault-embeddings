@@ -342,24 +342,70 @@ export class VaultEmbeddingRepository implements IEmbeddingRepository {
   }
 
   private async fileExists(path: string): Promise<boolean> {
+    // Obsidian 인덱스 먼저 확인
     const file = this.app.vault.getAbstractFileByPath(path);
-    return file instanceof TFile;
+    if (file instanceof TFile) {
+      return true;
+    }
+
+    // 인덱스에 없어도 실제 파일 시스템에 있을 수 있음 (Git 동기화)
+    try {
+      return await this.app.vault.adapter.exists(path);
+    } catch {
+      return false;
+    }
   }
 
   private async readFile(path: string): Promise<string> {
+    // Obsidian 인덱스 먼저 확인
     const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof TFile)) {
+    if (file instanceof TFile) {
+      return this.app.vault.read(file);
+    }
+
+    // 인덱스에 없어도 adapter로 직접 읽기 시도 (Git 동기화 대응)
+    try {
+      const content = await this.app.vault.adapter.read(path);
+      console.log(`Vault Embeddings: Used adapter.read for: ${path}`);
+      return content;
+    } catch {
       throw new Error(`File not found: ${path}`);
     }
-    return this.app.vault.read(file);
   }
 
   private async writeFile(path: string, content: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) {
       await this.app.vault.modify(file, content);
-    } else {
+      return;
+    }
+
+    // 파일이 인덱스에 없으면 생성 시도
+    try {
       await this.app.vault.create(path, content);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // "File already exists" 에러 → 인덱스 갱신 대기 후 modify 시도
+      if (errorMsg.toLowerCase().includes('already exists') ||
+          errorMsg.toLowerCase().includes('file already exists')) {
+        console.log(`Vault Embeddings: File already exists, retrying with modify: ${path}`);
+        await this.delay(100);
+
+        const retryFile = this.app.vault.getAbstractFileByPath(path);
+        if (retryFile instanceof TFile) {
+          await this.app.vault.modify(retryFile, content);
+          return;
+        }
+
+        // 여전히 인덱스에 없으면 adapter 직접 사용
+        // Obsidian의 low-level adapter로 직접 쓰기
+        await this.app.vault.adapter.write(path, content);
+        console.log(`Vault Embeddings: Used adapter.write for: ${path}`);
+        return;
+      }
+
+      throw error;
     }
   }
 

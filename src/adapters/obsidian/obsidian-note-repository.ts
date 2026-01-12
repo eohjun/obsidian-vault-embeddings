@@ -3,7 +3,7 @@
  * Obsidian Vault에서 노트 조회
  */
 
-import { App, TFile } from 'obsidian';
+import { App, TFile, normalizePath } from 'obsidian';
 import type { INoteRepository, NoteContent } from '../../core/domain';
 
 export class ObsidianNoteRepository implements INoteRepository {
@@ -29,7 +29,8 @@ export class ObsidianNoteRepository implements INoteRepository {
    * 파일 경로로 노트 조회
    */
   async findByPath(path: string): Promise<NoteContent | null> {
-    const file = this.app.vault.getAbstractFileByPath(path);
+    const normalizedPath = normalizePath(path);
+    const file = this.app.vault.getAbstractFileByPath(normalizedPath);
 
     if (!(file instanceof TFile)) {
       return null;
@@ -61,9 +62,11 @@ export class ObsidianNoteRepository implements INoteRepository {
   async findByFolder(folderPath: string): Promise<NoteContent[]> {
     const files = this.app.vault.getMarkdownFiles();
     const notes: NoteContent[] = [];
+    const normalizedFolder = normalizePath(folderPath);
 
     for (const file of files) {
-      if (file.path.startsWith(folderPath + '/')) {
+      const normalizedFilePath = normalizePath(file.path);
+      if (normalizedFilePath.startsWith(normalizedFolder + '/')) {
         const note = await this.fileToNoteContent(file);
         if (note) {
           notes.push(note);
@@ -80,11 +83,13 @@ export class ObsidianNoteRepository implements INoteRepository {
   async findAllExcluding(excludedFolders: string[]): Promise<NoteContent[]> {
     const files = this.app.vault.getMarkdownFiles();
     const notes: NoteContent[] = [];
+    const normalizedExcluded = excludedFolders.map(f => normalizePath(f));
 
     for (const file of files) {
+      const normalizedFilePath = normalizePath(file.path);
       // 제외 폴더 체크
-      const isExcluded = excludedFolders.some(
-        (folder) => file.path.startsWith(folder + '/') || file.path === folder
+      const isExcluded = normalizedExcluded.some(
+        (folder) => normalizedFilePath.startsWith(folder + '/') || normalizedFilePath === folder
       );
 
       if (!isExcluded) {
@@ -109,11 +114,12 @@ export class ObsidianNoteRepository implements INoteRepository {
   /**
    * 파일 경로로 노트 ID 생성
    * 안정적이고 예측 가능한 ID 생성
+   * 크로스 플랫폼 호환성을 위해 경로를 정규화
    */
   generateNoteId(path: string): string {
-    // 경로를 base64로 인코딩하여 안전한 ID 생성
-    // .md 확장자 제거 후 인코딩
-    const pathWithoutExt = path.replace(/\.md$/, '');
+    // 경로 정규화 후 .md 확장자 제거
+    const normalizedPath = normalizePath(path);
+    const pathWithoutExt = normalizedPath.replace(/\.md$/, '');
     return this.simpleHash(pathWithoutExt);
   }
 
@@ -122,10 +128,11 @@ export class ObsidianNoteRepository implements INoteRepository {
   private async fileToNoteContent(file: TFile): Promise<NoteContent | null> {
     try {
       const content = await this.app.vault.cachedRead(file);
+      const normalizedPath = normalizePath(file.path);
 
       return {
         noteId: this.generateNoteId(file.path),
-        path: file.path,
+        path: normalizedPath,
         title: file.basename,
         content,
         modifiedAt: new Date(file.stat.mtime),

@@ -3,7 +3,7 @@
  * Centralized embedding storage for Obsidian vault
  */
 
-import { Plugin, TFile, Notice, debounce } from 'obsidian';
+import { Plugin, TFile, Notice, debounce, normalizePath } from 'obsidian';
 
 // Domain
 import type { SearchResult, SearchOptions } from './core/domain';
@@ -180,9 +180,10 @@ export default class VaultEmbeddingsPlugin extends Plugin {
         async (file: TFile) => {
           if (!this.embeddingService || !this.noteRepository) return;
 
-          // 제외 폴더 체크
+          // 제외 폴더 체크 (크로스 플랫폼 호환성을 위해 경로 정규화)
+          const normalizedFilePath = normalizePath(file.path);
           const isExcluded = this.settings.excludedFolders.some(
-            (folder) => file.path.startsWith(folder + '/')
+            (folder) => normalizedFilePath.startsWith(normalizePath(folder) + '/')
           );
           if (isExcluded) return;
 

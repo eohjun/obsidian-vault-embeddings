@@ -86,6 +86,11 @@ export default class VaultEmbeddingsPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     console.log('Unloading Vault Embeddings Plugin');
+    this.autoEmbedDebounced = null;
+    this.embeddingService = null;
+    this.embeddingRepository = null;
+    this.embeddingProvider = null;
+    this.noteRepository = null;
   }
 
   async loadSettings(): Promise<void> {
@@ -117,6 +122,7 @@ export default class VaultEmbeddingsPlugin extends Plugin {
     if (!this.settings.openaiApiKey) {
       console.log('Vault Embeddings: API key not configured');
       this.initError = 'API key not configured';
+      new Notice('Vault Embeddings: API key not configured. Set it in Settings → Vault Embeddings.');
       return;
     }
 
@@ -143,6 +149,7 @@ export default class VaultEmbeddingsPlugin extends Plugin {
         const msg = storageError instanceof Error ? storageError.message : 'Unknown storage error';
         console.error('Vault Embeddings: Storage initialization failed:', msg);
         this.initError = `Storage initialization failed: ${msg}`;
+        new Notice(`Vault Embeddings: Storage initialization failed — ${msg}`);
         return;
       }
 
@@ -196,7 +203,7 @@ export default class VaultEmbeddingsPlugin extends Plugin {
           }
         },
         this.settings.autoEmbedDelay,
-        true
+        false // trailing edge: embed only the final state after edits settle
       );
     }
   }

@@ -70,11 +70,13 @@ export class VaultEmbeddingRepository implements IEmbeddingRepository {
   }
 
   /**
-   * 여러 임베딩 일괄 저장
+   * 여러 임베딩 일괄 저장 (BATCH_SIZE 단위 병렬)
    */
   async saveBatch(embeddings: NoteEmbedding[]): Promise<void> {
-    for (const embedding of embeddings) {
-      await this.save(embedding);
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < embeddings.length; i += BATCH_SIZE) {
+      const batch = embeddings.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map((embedding) => this.save(embedding)));
     }
   }
 

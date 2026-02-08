@@ -116,14 +116,16 @@ export class GoogleEmbeddingProvider implements IEmbeddingProvider {
   async testApiKey(apiKey: string): Promise<boolean> {
     try {
       const response = await requestUrl({
-        url: `${GOOGLE_API_BASE}/${this.model}:embedContent?key=${apiKey}`,
+        url: `${GOOGLE_API_BASE}/${this.model}:embedContent`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
         },
         body: JSON.stringify({
           content: { parts: [{ text: 'test' }] },
         }),
+        throw: false,
       });
 
       return response.status === 200;
@@ -149,10 +151,11 @@ export class GoogleEmbeddingProvider implements IEmbeddingProvider {
 
     try {
       const response = await requestUrl({
-        url: `${url}?key=${this.apiKey}`,
+        url,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey,
         },
         body: JSON.stringify(body),
       });

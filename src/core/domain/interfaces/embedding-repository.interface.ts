@@ -72,6 +72,12 @@ export interface IEmbeddingRepository {
   updateIndex(): Promise<void>;
 
   /**
+   * 단일 임베딩 항목의 인덱스 증분 업데이트 (O(1))
+   * @param embedding 업데이트할 임베딩
+   */
+  updateIndexEntry(embedding: NoteEmbedding): Promise<void>;
+
+  /**
    * 인덱스 조회
    */
   getIndex(): Promise<EmbeddingIndex>;

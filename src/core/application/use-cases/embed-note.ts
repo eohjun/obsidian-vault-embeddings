@@ -5,6 +5,7 @@
 
 import type {
   NoteEmbedding,
+  NoteContent,
   IEmbeddingProvider,
   IEmbeddingRepository,
   INoteRepository,
@@ -27,9 +28,9 @@ export class EmbedNoteUseCase {
   /**
    * 노트 임베딩 생성 (신규 또는 업데이트)
    */
-  async execute(noteId: string): Promise<EmbedNoteResult> {
+  async execute(noteId: string, preloadedNote?: NoteContent): Promise<EmbedNoteResult> {
     // 노트 내용 조회
-    const note = await this.noteRepository.findById(noteId);
+    const note = preloadedNote ?? await this.noteRepository.findById(noteId);
     if (!note) {
       throw new Error(`Note not found: ${noteId}`);
     }

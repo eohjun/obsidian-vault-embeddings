@@ -61,7 +61,26 @@ export class EmbeddingService {
    * 단일 노트 임베딩
    */
   async embedNote(noteId: string): Promise<EmbedNoteResult> {
-    return this.embedNoteUseCase.execute(noteId);
+    const result = await this.embedNoteUseCase.execute(noteId);
+    if (result.wasUpdated) {
+      await this.embeddingRepository.updateIndexEntry(result.embedding);
+    }
+    return result;
+  }
+
+  /**
+   * 파일 경로로 단일 노트 임베딩 (O(1) 경로 조회)
+   */
+  async embedNoteByPath(filePath: string): Promise<EmbedNoteResult> {
+    const note = await this.noteRepository.findByPath(filePath);
+    if (!note) {
+      throw new Error(`Note not found at path: ${filePath}`);
+    }
+    const result = await this.embedNoteUseCase.execute(note.noteId, note);
+    if (result.wasUpdated) {
+      await this.embeddingRepository.updateIndexEntry(result.embedding);
+    }
+    return result;
   }
 
   /**

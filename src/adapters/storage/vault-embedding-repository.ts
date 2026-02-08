@@ -205,6 +205,23 @@ export class VaultEmbeddingRepository implements IEmbeddingRepository {
   }
 
   /**
+   * 단일 항목 인덱스 증분 업데이트 (O(1))
+   */
+  async updateIndexEntry(embedding: NoteEmbedding): Promise<void> {
+    const index = await this.getIndex();
+    index.notes[embedding.noteId] = {
+      path: embedding.notePath,
+      contentHash: embedding.contentHash,
+      updatedAt: embedding.updatedAt.toISOString(),
+    };
+    index.totalNotes = Object.keys(index.notes).length;
+    index.lastUpdated = new Date().toISOString();
+    if (!index.model) index.model = embedding.model;
+    if (!index.dimensions) index.dimensions = embedding.dimensions;
+    await this.saveIndex(index);
+  }
+
+  /**
    * 인덱스 조회
    */
   async getIndex(): Promise<EmbeddingIndex> {

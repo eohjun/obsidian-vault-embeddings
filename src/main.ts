@@ -35,8 +35,10 @@ export default class VaultEmbeddingsPlugin extends Plugin {
   private noteRepository: ObsidianNoteRepository | null = null;
   private embeddingService: EmbeddingService | null = null;
 
-  // Auto-embed debounce
-  private autoEmbedDebounced: ((file: TFile) => void) | null = null;
+  // Auto-embed batch queue
+  private pendingAutoEmbedFiles: Map<string, TFile> = new Map();
+  private processAutoEmbedDebounced: (() => void) | null = null;
+  private autoEmbedProcessing = false;
 
   async onload(): Promise<void> {
     console.log('Loading Vault Embeddings Plugin');
@@ -86,7 +88,9 @@ export default class VaultEmbeddingsPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     console.log('Unloading Vault Embeddings Plugin');
-    this.autoEmbedDebounced = null;
+    this.processAutoEmbedDebounced = null;
+    this.pendingAutoEmbedFiles.clear();
+    this.autoEmbedProcessing = false;
     this.embeddingService = null;
     this.embeddingRepository = null;
     this.embeddingProvider = null;
@@ -178,33 +182,54 @@ export default class VaultEmbeddingsPlugin extends Plugin {
    * Auto-embed 설정
    */
   private setupAutoEmbed(): void {
-    if (this.autoEmbedDebounced) {
-      this.autoEmbedDebounced = null;
+    if (this.processAutoEmbedDebounced) {
+      this.processAutoEmbedDebounced = null;
     }
+    this.pendingAutoEmbedFiles.clear();
 
     if (this.settings.autoEmbed && this.embeddingService) {
-      this.autoEmbedDebounced = debounce(
-        async (file: TFile) => {
-          if (!this.embeddingService || !this.noteRepository) return;
-
-          // 제외 폴더 체크 (크로스 플랫폼 호환성을 위해 경로 정규화)
-          const normalizedFilePath = normalizePath(file.path);
-          const isExcluded = this.settings.excludedFolders.some(
-            (folder) => normalizedFilePath.startsWith(normalizePath(folder) + '/')
-          );
-          if (isExcluded) return;
-
-          try {
-            const noteId = this.noteRepository.generateNoteId(file.path);
-            await this.embeddingService.embedNote(noteId);
-            console.log(`Auto-embedded: ${file.path}`);
-          } catch (error) {
-            console.error(`Auto-embed failed for ${file.path}:`, error);
-          }
-        },
+      this.processAutoEmbedDebounced = debounce(
+        () => { this.processAutoEmbedQueue(); },
         this.settings.autoEmbedDelay,
-        false // trailing edge: embed only the final state after edits settle
+        false // trailing edge: process batch after edits settle
       );
+    }
+  }
+
+  private async processAutoEmbedQueue(): Promise<void> {
+    if (!this.embeddingService || !this.noteRepository) return;
+    if (this.autoEmbedProcessing) {
+      // 이미 처리 중이면, 누적된 파일은 다음 라운드에서 처리
+      if (this.pendingAutoEmbedFiles.size > 0 && this.processAutoEmbedDebounced) {
+        this.processAutoEmbedDebounced();
+      }
+      return;
+    }
+
+    this.autoEmbedProcessing = true;
+    try {
+      const filesToProcess = new Map(this.pendingAutoEmbedFiles);
+      this.pendingAutoEmbedFiles.clear();
+
+      for (const [, file] of filesToProcess) {
+        const normalizedFilePath = normalizePath(file.path);
+        const isExcluded = this.settings.excludedFolders.some(
+          (folder) => normalizedFilePath.startsWith(normalizePath(folder) + '/')
+        );
+        if (isExcluded) continue;
+
+        try {
+          await this.embeddingService.embedNoteByPath(file.path);
+          console.log(`Auto-embedded: ${file.path}`);
+        } catch (error) {
+          console.error(`Auto-embed failed for ${file.path}:`, error);
+        }
+      }
+    } finally {
+      this.autoEmbedProcessing = false;
+      if (this.pendingAutoEmbedFiles.size > 0 && this.processAutoEmbedDebounced) {
+        this.processAutoEmbedDebounced();
+      }
     }
   }
 
@@ -216,8 +241,9 @@ export default class VaultEmbeddingsPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on('modify', (file) => {
         if (file instanceof TFile && file.extension === 'md') {
-          if (this.autoEmbedDebounced) {
-            this.autoEmbedDebounced(file);
+          if (this.processAutoEmbedDebounced) {
+            this.pendingAutoEmbedFiles.set(file.path, file);
+            this.processAutoEmbedDebounced();
           }
         }
       })
@@ -227,8 +253,9 @@ export default class VaultEmbeddingsPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on('create', (file) => {
         if (file instanceof TFile && file.extension === 'md') {
-          if (this.autoEmbedDebounced) {
-            this.autoEmbedDebounced(file);
+          if (this.processAutoEmbedDebounced) {
+            this.pendingAutoEmbedFiles.set(file.path, file);
+            this.processAutoEmbedDebounced();
           }
         }
       })
@@ -262,8 +289,9 @@ export default class VaultEmbeddingsPlugin extends Plugin {
               await this.embeddingService.deleteEmbedding(oldNoteId);
 
               // 새 임베딩 생성
-              if (this.autoEmbedDebounced) {
-                this.autoEmbedDebounced(file);
+              if (this.processAutoEmbedDebounced) {
+                this.pendingAutoEmbedFiles.set(file.path, file);
+                this.processAutoEmbedDebounced();
               }
             } catch (error) {
               console.error(`Failed to handle rename for ${file.path}:`, error);
@@ -379,8 +407,7 @@ export default class VaultEmbeddingsPlugin extends Plugin {
     }
 
     try {
-      const noteId = this.noteRepository.generateNoteId(activeFile.path);
-      const result = await this.embeddingService.embedNote(noteId);
+      const result = await this.embeddingService.embedNoteByPath(activeFile.path);
 
       if (result.wasUpdated) {
         new Notice(`Embedded: ${activeFile.basename}`);

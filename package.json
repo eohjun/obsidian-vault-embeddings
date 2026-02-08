@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vault-embeddings",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "Centralized embedding storage for Obsidian vault - embed once, use everywhere",
   "main": "main.js",
   "scripts": {

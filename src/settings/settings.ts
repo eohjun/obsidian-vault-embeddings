@@ -2,9 +2,20 @@
  * Plugin Settings
  */
 
+import type { EmbeddingProviderType } from '../adapters/embedding/provider-config';
+
 export interface VaultEmbeddingsSettings {
   /** OpenAI API 키 */
   openaiApiKey: string;
+
+  /** 임베딩 프로바이더 */
+  provider: EmbeddingProviderType;
+
+  /** Google API 키 */
+  googleApiKey: string;
+
+  /** Voyage AI API 키 */
+  voyageaiApiKey: string;
 
   /** 임베딩 저장 폴더 */
   storagePath: string;
@@ -24,6 +35,9 @@ export interface VaultEmbeddingsSettings {
 
 export const DEFAULT_SETTINGS: VaultEmbeddingsSettings = {
   openaiApiKey: '',
+  provider: 'openai',
+  googleApiKey: '',
+  voyageaiApiKey: '',
   storagePath: '09_Embedded',
   excludedFolders: ['06_Meta', 'Templates'],
   autoEmbed: true,

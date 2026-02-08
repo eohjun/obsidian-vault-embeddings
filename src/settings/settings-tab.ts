@@ -5,6 +5,12 @@
 import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
 import type VaultEmbeddingsPlugin from '../main';
 import { ProgressModal } from '../ui/progress-modal';
+import {
+  PROVIDER_CONFIGS,
+  getActiveApiKey,
+  getDefaultModel,
+  type EmbeddingProviderType,
+} from '../adapters/embedding/provider-config';
 
 export class VaultEmbeddingsSettingTab extends PluginSettingTab {
   plugin: VaultEmbeddingsPlugin;
@@ -20,18 +26,52 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
 
     containerEl.createEl('h2', { text: 'Vault Embeddings Settings' });
 
+    // Dimension mismatch warning (async — inserted at top if needed)
+    this.displayMismatchWarning(containerEl);
+
     // API Settings Section
     containerEl.createEl('h3', { text: 'API Settings' });
 
+    // Provider dropdown
     new Setting(containerEl)
-      .setName('OpenAI API Key')
-      .setDesc('API key for generating embeddings (text-embedding-3-small)')
+      .setName('Embedding Provider')
+      .setDesc('Select the embedding provider to use')
+      .addDropdown((dropdown) => {
+        for (const [key, config] of Object.entries(PROVIDER_CONFIGS)) {
+          dropdown.addOption(key, config.name);
+        }
+        dropdown.setValue(this.plugin.settings.provider);
+        dropdown.onChange(async (value) => {
+          const provider = value as EmbeddingProviderType;
+          this.plugin.settings.provider = provider;
+          this.plugin.settings.model = getDefaultModel(provider);
+          await this.plugin.saveSettings();
+          this.display(); // re-render for conditional fields
+        });
+      });
+
+    // Active provider's API key
+    const providerConfig = PROVIDER_CONFIGS[this.plugin.settings.provider];
+
+    new Setting(containerEl)
+      .setName(`${providerConfig.name} API Key`)
+      .setDesc(`API key for ${providerConfig.name} embeddings`)
       .addText((text) => {
         text
-          .setPlaceholder('sk-...')
-          .setValue(this.plugin.settings.openaiApiKey)
+          .setPlaceholder(providerConfig.apiKeyPlaceholder)
+          .setValue(getActiveApiKey(this.plugin.settings))
           .onChange(async (value) => {
-            this.plugin.settings.openaiApiKey = value;
+            switch (this.plugin.settings.provider) {
+              case 'openai':
+                this.plugin.settings.openaiApiKey = value;
+                break;
+              case 'google':
+                this.plugin.settings.googleApiKey = value;
+                break;
+              case 'voyageai':
+                this.plugin.settings.voyageaiApiKey = value;
+                break;
+            }
             await this.plugin.saveSettings();
           });
         text.inputEl.type = 'password';
@@ -39,7 +79,7 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
       })
       .addButton((button) => {
         button.setButtonText('Test').onClick(async () => {
-          if (!this.plugin.settings.openaiApiKey) {
+          if (!getActiveApiKey(this.plugin.settings)) {
             new Notice('Please enter an API key first');
             return;
           }
@@ -60,6 +100,22 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
             button.setDisabled(false);
             button.setButtonText('Test');
           }
+        });
+      });
+
+    // Model dropdown
+    new Setting(containerEl)
+      .setName('Embedding Model')
+      .setDesc('Select the model to use for generating embeddings')
+      .addDropdown((dropdown) => {
+        for (const model of providerConfig.models) {
+          dropdown.addOption(model.id, model.name);
+        }
+        dropdown.setValue(this.plugin.settings.model);
+        dropdown.onChange(async (value) => {
+          this.plugin.settings.model = value;
+          await this.plugin.saveSettings();
+          this.display(); // re-render to update mismatch warning
         });
       });
 
@@ -157,11 +213,11 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
               });
 
               modal.setComplete(
-                `✅ Complete! ${result.success} embedded, ${result.skipped} skipped, ${result.failed} failed`
+                `Complete! ${result.success} embedded, ${result.skipped} skipped, ${result.failed} failed`
               );
             } catch (error) {
               const msg = error instanceof Error ? error.message : 'Unknown error';
-              modal.setError(`❌ Failed: ${msg}`);
+              modal.setError(`Failed: ${msg}`);
             }
           });
       });
@@ -195,11 +251,11 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
             });
 
             modal.setComplete(
-              `✅ Complete! ${result.updated} updated, ${result.skipped} skipped, ${result.failed} failed`
+              `Complete! ${result.updated} updated, ${result.skipped} skipped, ${result.failed} failed`
             );
           } catch (error) {
             const msg = error instanceof Error ? error.message : 'Unknown error';
-            modal.setError(`❌ Failed: ${msg}`);
+            modal.setError(`Failed: ${msg}`);
           }
         });
       });
@@ -229,6 +285,38 @@ export class VaultEmbeddingsSettingTab extends PluginSettingTab {
 
     const statsEl = containerEl.createDiv({ cls: 'vault-embeddings-stats' });
     this.displayStats(statsEl);
+  }
+
+  /**
+   * 차원 불일치 경고 배너 (비동기)
+   */
+  private async displayMismatchWarning(container: HTMLElement): Promise<void> {
+    try {
+      const result = await this.plugin.hasProviderMismatch();
+      if (result.mismatch) {
+        const warningEl = container.createDiv({ cls: 'vault-embeddings-mismatch-warning' });
+        warningEl.style.padding = '12px';
+        warningEl.style.marginBottom = '12px';
+        warningEl.style.backgroundColor = 'var(--background-modifier-error)';
+        warningEl.style.borderRadius = '8px';
+        warningEl.style.color = 'var(--text-on-accent)';
+
+        warningEl.createEl('strong', { text: 'Dimension Mismatch Warning' });
+        warningEl.createEl('p', {
+          text: `Stored embeddings use ${result.storedDimensions}d vectors. ` +
+            `Current provider/model uses ${result.currentDimensions}d. ` +
+            `Run "Embed All" to re-embed all notes with the new provider.`,
+        });
+
+        // Move warning to right after the h2
+        const h2 = container.querySelector('h2');
+        if (h2 && h2.nextSibling) {
+          container.insertBefore(warningEl, h2.nextSibling);
+        }
+      }
+    } catch {
+      // silently ignore — stats may not be available yet
+    }
   }
 
   private async displayStats(container: HTMLElement): Promise<void> {

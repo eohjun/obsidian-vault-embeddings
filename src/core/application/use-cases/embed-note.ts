@@ -45,11 +45,17 @@ export class EmbedNoteUseCase {
     if (existingHash && isHashEqual(existingHash, currentHash)) {
       const existing = await this.embeddingRepository.findById(noteId);
       if (existing) {
-        return {
-          embedding: existing,
-          wasUpdated: false,
-          reason: 'skipped',
-        };
+        // 프로바이더/모델 변경 확인 — 변경 시 재임베딩 필요
+        const currentProvider = this.embeddingProvider.getProvider();
+        const currentModel = this.embeddingProvider.getModel();
+        if (existing.provider === currentProvider && existing.model === currentModel) {
+          return {
+            embedding: existing,
+            wasUpdated: false,
+            reason: 'skipped',
+          };
+        }
+        // 프로바이더/모델 변경 → 아래에서 재임베딩 진행
       }
     }
 

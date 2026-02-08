@@ -6,7 +6,7 @@
 import { Plugin, TFile, Notice, debounce, normalizePath } from 'obsidian';
 
 // Domain
-import type { SearchResult, SearchOptions } from './core/domain';
+import type { IEmbeddingProvider, SearchResult, SearchOptions } from './core/domain';
 
 // Application
 import {
@@ -17,7 +17,9 @@ import {
 
 // Adapters
 import {
-  OpenAIEmbeddingProvider,
+  createEmbeddingProvider,
+  getActiveApiKey,
+  getModelDimensions,
   VaultEmbeddingRepository,
   ObsidianNoteRepository,
 } from './adapters';
@@ -30,7 +32,7 @@ export default class VaultEmbeddingsPlugin extends Plugin {
   settings!: VaultEmbeddingsSettings;
 
   // Services
-  private embeddingProvider: OpenAIEmbeddingProvider | null = null;
+  private embeddingProvider: IEmbeddingProvider | null = null;
   private embeddingRepository: VaultEmbeddingRepository | null = null;
   private noteRepository: ObsidianNoteRepository | null = null;
   private embeddingService: EmbeddingService | null = null;
@@ -123,7 +125,7 @@ export default class VaultEmbeddingsPlugin extends Plugin {
     this.initError = null;
     
     // API 키가 없으면 서비스 초기화하지 않음
-    if (!this.settings.openaiApiKey) {
+    if (!getActiveApiKey(this.settings)) {
       console.log('Vault Embeddings: API key not configured');
       this.initError = 'API key not configured';
       new Notice('Vault Embeddings: API key not configured. Set it in Settings → Vault Embeddings.');
@@ -133,10 +135,7 @@ export default class VaultEmbeddingsPlugin extends Plugin {
     try {
       // Step 1: Embedding Provider
       console.log('Vault Embeddings: Initializing provider...');
-      this.embeddingProvider = new OpenAIEmbeddingProvider(
-        this.settings.openaiApiKey,
-        this.settings.model
-      );
+      this.embeddingProvider = createEmbeddingProvider(this.settings);
       console.log('Vault Embeddings: Provider initialized');
 
       // Step 2: Embedding Repository
@@ -308,7 +307,7 @@ export default class VaultEmbeddingsPlugin extends Plugin {
    * 플러그인 설정 여부
    */
   isConfigured(): boolean {
-    return !!this.settings.openaiApiKey && !!this.embeddingService;
+    return !!getActiveApiKey(this.settings) && !!this.embeddingService;
   }
 
   /**
@@ -318,7 +317,7 @@ export default class VaultEmbeddingsPlugin extends Plugin {
     if (!this.embeddingProvider) {
       return false;
     }
-    return this.embeddingProvider.testApiKey(this.settings.openaiApiKey);
+    return this.embeddingProvider.testApiKey(getActiveApiKey(this.settings));
   }
 
   /**
@@ -363,12 +362,27 @@ export default class VaultEmbeddingsPlugin extends Plugin {
       return {
         totalEmbeddings: 0,
         model: this.settings.model,
-        provider: 'openai',
-        dimensions: 1536,
+        provider: this.settings.provider,
+        dimensions: getModelDimensions(this.settings.provider, this.settings.model),
         lastUpdated: null,
       };
     }
     return this.embeddingService.getStats();
+  }
+
+  /**
+   * 저장된 임베딩과 현재 프로바이더의 차원 불일치 확인
+   */
+  async hasProviderMismatch(): Promise<{ mismatch: boolean; storedDimensions?: number; currentDimensions?: number }> {
+    const stats = await this.getStats();
+    if (stats.totalEmbeddings === 0) {
+      return { mismatch: false };
+    }
+    const currentDimensions = getModelDimensions(this.settings.provider, this.settings.model);
+    if (stats.dimensions && stats.dimensions !== currentDimensions) {
+      return { mismatch: true, storedDimensions: stats.dimensions, currentDimensions };
+    }
+    return { mismatch: false };
   }
 
   /**

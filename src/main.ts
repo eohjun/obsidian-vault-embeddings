@@ -386,6 +386,28 @@ export default class VaultEmbeddingsPlugin extends Plugin {
   }
 
   /**
+   * 쿼리 텍스트를 현재 프로바이더로 임베딩 (소비자 플러그인용)
+   */
+  async embedQuery(text: string): Promise<number[]> {
+    if (!this.embeddingProvider) {
+      throw new Error('Embedding provider not initialized');
+    }
+    return this.embeddingProvider.embed(text);
+  }
+
+  /**
+   * 현재 임베딩 프로바이더 정보 (소비자 플러그인용)
+   */
+  getProviderInfo(): { provider: string; model: string; dimensions: number } | null {
+    if (!this.embeddingProvider) return null;
+    return {
+      provider: this.embeddingProvider.getProvider(),
+      model: this.embeddingProvider.getModel(),
+      dimensions: this.embeddingProvider.getDimensions(),
+    };
+  }
+
+  /**
    * 유사 노트 검색 (다른 플러그인에서 사용)
    */
   async searchSimilar(query: string, options?: SearchOptions): Promise<SearchResult[]> {
